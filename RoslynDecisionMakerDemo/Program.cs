@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis.Scripting;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace RoslynDecisionMakerDemo
 {
@@ -10,71 +11,88 @@ namespace RoslynDecisionMakerDemo
         static void Main(string[] args)
         {
             Dictionary<string, string> inputVariables = new Dictionary<string, string>();
-            inputVariables.Add("a", "30");
-            inputVariables.Add("b", "40");
+            inputVariables.Add("x", "30");
+            inputVariables.Add("y", "40");
 
             Dictionary<string, string> calculatedVariables = new Dictionary<string, string>();
-            calculatedVariables.Add("area", "{{a}} * {{b}}");
+            calculatedVariables.Add("area", "x * y");
 
-            string ruleCondition = "{{area}} > 1000 && {{a}} < 2 * {{b}}";
-            string ruleOutput = "The condition was evaluated as true.";
+            string[] rules = {
+                "area > 1000 && x < 2 * y",
+                "area < 1000",
+                "area > 1000 && y > 500"
+            };
 
-            /// Replace variable names with variable values in all calculated variables
-            var calculatedVariableKeys = new List<string>(calculatedVariables.Keys);
-            foreach (var calculatedVariableKey in calculatedVariableKeys)
+            Task.Run(async () =>
             {
-                foreach (var inputVariable in inputVariables)
-                {
-                    calculatedVariables[calculatedVariableKey] = calculatedVariables[calculatedVariableKey].Replace("{{" + inputVariable.Key + "}}", inputVariable.Value);
-                }
-            }
-
-            /// Evaluate the values of calculated variables
-            /// and store them in a new dictionary
-            Dictionary<string, string> calculatedVariablesEvaluated = new Dictionary<string, string>();
-            foreach (var calculatedVariable in calculatedVariables)
-            {
-                string calculatedValue = String.Empty;
+                /// Code for the solution using Roslyn state
+                Console.WriteLine("Using Roslyn state:");
                 try
                 {
-                    calculatedValue = CSharpScript.EvaluateAsync(calculatedVariable.Value).Result.ToString();
+                    var state = await CSharpScript.RunAsync("");
+
+                    // Declare input variables
+                    foreach (var item in inputVariables)
+                    {
+                        state = await state.ContinueWithAsync(String.Format("var {0} = {1};", item.Key, item.Value));
+                    }
+
+                    // Declare and calculate calculated variables
+                    foreach (var item in calculatedVariables)
+                    {
+                        state = await state.ContinueWithAsync(String.Format("var {0} = {1};", item.Key, item.Value));
+                    }
+
+                    // Evaluate each condition
+                    foreach (var rule in rules)
+                    {
+                        state = await state.ContinueWithAsync(rule);
+                        Console.WriteLine(String.Format("Rule '{0}' was evaluated as {1}", rule, (bool)state.ReturnValue));
+                    }
                 }
                 catch (CompilationErrorException e)
                 {
                     Console.WriteLine(string.Join(Environment.NewLine, e.Diagnostics));
-                    return;
                 }
 
-                calculatedVariablesEvaluated.Add(calculatedVariable.Key, calculatedValue);
-            }
+                Console.WriteLine(Environment.NewLine);
 
-            /// Replace input and calculated variables in rule condition with appropriate values
-            foreach (var inputVariable in inputVariables)
-            {
-                ruleCondition = ruleCondition.Replace("{{" + inputVariable.Key + "}}", inputVariable.Value);
-            }
-            foreach (var calculatedVariableEvaluated in calculatedVariablesEvaluated)
-            {
-                ruleCondition = ruleCondition.Replace("{{" + calculatedVariableEvaluated.Key + "}}", calculatedVariableEvaluated.Value);
-            }
-            bool isConditionTrue;
-            try
-            {
-                isConditionTrue = CSharpScript.EvaluateAsync<bool>(ruleCondition).Result;
-            }
-            catch (CompilationErrorException e)
-            {
-                Console.WriteLine(string.Join(Environment.NewLine, e.Diagnostics));
-                return;
-            }
+                /// Code using replacing and evaluation of formulas
+                Console.WriteLine("Using replacing and Roslyn evaluation of formulas:");
+                try
+                {
+                    List<string> keys = new List<string>(calculatedVariables.Keys);
+                    foreach (var key in keys)
+                    {
+                        foreach (var item in inputVariables)
+                        {
+                            calculatedVariables[key] = calculatedVariables[key].Replace(item.Key, item.Value);
+                        };
+                        calculatedVariables[key] = (await CSharpScript.EvaluateAsync(calculatedVariables[key])).ToString();
+                    }
 
-            /// If condition is true, return the output
-            if (isConditionTrue)
-            {
-                Console.WriteLine(ruleOutput);
-            }
+
+                    for (var i = 0; i < rules.Length; i++)
+                    {
+                        foreach (var item in inputVariables)
+                        {
+                            rules[i] = rules[i].Replace(item.Key, item.Value);
+                        }
+                        foreach (var item in calculatedVariables)
+                        {
+                            rules[i] = rules[i].Replace(item.Key, item.Value);
+                        }
+                        bool isRuleTrue = await CSharpScript.EvaluateAsync<bool>(rules[i]);
+                        Console.WriteLine(String.Format("Rule '{0}' was evaluated as {1}", rules[i], isRuleTrue));
+                    }
+
+                }
+                catch (CompilationErrorException e)
+                {
+                    Console.WriteLine(string.Join(Environment.NewLine, e.Diagnostics));
+                }
+            }).GetAwaiter().GetResult();
             Console.ReadKey();
-            
         }
     }
 }
